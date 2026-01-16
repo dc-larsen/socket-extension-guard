@@ -15,8 +15,8 @@ Required scope: **Full Access** (for extension scanning)
 **2. Clone and configure**
 
 ```bash
-git clone https://github.com/dc-larsen/extension-guard-demo.git
-cd extension-guard-demo
+git clone https://github.com/dc-larsen/socket-extension-guard.git
+cd socket-extension-guard
 cp .env.example .env
 # Edit .env and add your SOCKET_API_KEY
 ```
@@ -53,11 +53,11 @@ This scans a curated set of extensions (good, risky, and known-bad) and opens an
 
 ## Documentation
 
-- [Installation Guide](docs/installation.md)
-- [API Reference](docs/api-reference.md)
+- [Quickstart Guide](docs/quickstart.md)
 - [Understanding Alerts](docs/understanding-alerts.md)
 - [Decision Framework](docs/decision-framework.md)
-- [Enterprise Deployment](docs/enterprise.md)
+- [API Reference](docs/api-reference.md)
+- [Enterprise Use Cases](docs/enterprise-use-cases.md)
 
 ## Example Output
 
