@@ -1,8 +1,10 @@
+<p align="center">
+  <img src="docs/assets/banner.png" alt="Extension Guard" width="800">
+</p>
+
 # Socket Extension Guard
 
 Scan Chrome extensions for security risks using Socket's Extension Guard API. Get actionable insights to decide whether to allow or block extensions in your organization.
-
-![Extension Guard Demo](docs/assets/demo-preview.png)
 
 ## Quick Start
 
