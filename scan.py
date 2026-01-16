@@ -23,7 +23,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from extension_guard import ExtensionGuardClient, generate_html_report
-from extension_guard.models import Recommendation
 
 
 def main():
@@ -129,8 +128,6 @@ Examples:
                     "supplyChain": r.score_supply_chain,
                     "vulnerability": r.score_vulnerability,
                 },
-                "recommendation": r.recommendation.value,
-                "reason": r.recommendation_reason,
                 "alerts": {
                     "total": len(r.alerts),
                     "critical": len(r.critical_alerts),
@@ -138,7 +135,6 @@ Examples:
                     "medium": len(r.medium_alerts),
                     "low": len(r.low_alerts),
                 },
-                "highRiskPermissions": r.high_risk_permissions,
                 "error": r.error,
             })
 
@@ -166,78 +162,47 @@ Examples:
             print_result(result)
             print()
 
-        # Summary
-        if len(results) > 1:
-            blocked = sum(1 for r in results if r.recommendation == Recommendation.BLOCK)
-            review = sum(1 for r in results if r.recommendation == Recommendation.REVIEW)
-            allowed = sum(1 for r in results if r.recommendation == Recommendation.ALLOW)
-
-            print("=" * 50)
-            print(f"Summary: {blocked} BLOCK, {review} REVIEW, {allowed} ALLOW")
-            print("=" * 50)
-
-    # Exit with error if any extensions should be blocked
-    if any(r.recommendation == Recommendation.BLOCK for r in results):
-        sys.exit(1)
-
 
 def print_result(result):
     """Print a single result in text format."""
-    rec = result.recommendation
-    rec_icon = rec.icon
+    if result.error:
+        print(f"Extension: {result.name or result.input_purl.replace('pkg:chrome/', '')}")
+        print(f"Error:     {result.error}")
+        return
 
-    # Header
     print(f"Extension: {result.name}")
     print(f"ID:        {result.input_purl.replace('pkg:chrome/', '')}")
     print(f"Version:   {result.version}")
     print(f"Size:      {result.size_human}")
     print()
 
-    # Score
-    score = result.score_overall
-    if score >= 0.7:
-        score_label = "Good"
-    elif score >= 0.4:
-        score_label = "Moderate Risk"
-    else:
-        score_label = "High Risk"
-
-    print(f"Score:     {score:.2f}/1.0 ({score_label})")
-    print()
-
-    # Recommendation
-    print(f"Recommendation: {rec_icon} {rec.value.upper()}")
-    print(f"Reason:         {result.recommendation_reason}")
+    # Scores
+    print(f"Scores:")
+    print(f"  Overall:       {result.score_overall:.2f}")
+    print(f"  Supply Chain:  {result.score_supply_chain:.2f}")
+    print(f"  Vulnerability: {result.score_vulnerability:.2f}")
     print()
 
     # Alert counts
     print(f"Alerts ({len(result.alerts)} total):")
-    print(f"  CRITICAL: {len(result.critical_alerts)}")
-    print(f"  HIGH:     {len(result.high_alerts)}")
-    print(f"  MEDIUM:   {len(result.medium_alerts)}")
-    print(f"  LOW:      {len(result.low_alerts)}")
+    print(f"  Critical: {len(result.critical_alerts)}")
+    print(f"  High:     {len(result.high_alerts)}")
+    print(f"  Medium:   {len(result.medium_alerts)}")
+    print(f"  Low:      {len(result.low_alerts)}")
 
-    # High-risk permissions
-    if result.high_risk_permissions:
+    # Show alerts by type
+    if result.alerts:
         print()
-        print("High-risk permissions:")
-        for perm in result.high_risk_permissions:
-            print(f"  - {perm}")
-
-    # Show critical/high alerts
-    critical_high = result.critical_alerts + result.high_alerts
-    if critical_high:
-        print()
-        print("Critical/High alerts:")
-        for alert in critical_high[:10]:
-            val = alert.display_value
-            if val:
-                print(f"  - {alert.type}: {val}")
+        print("Alert breakdown:")
+        for alert_type, alerts in result.alerts_by_type().items():
+            severity = alerts[0].severity.value
+            values = [a.display_value for a in alerts if a.display_value]
+            if values:
+                print(f"  [{severity}] {alert_type}: {', '.join(values[:5])}")
+                if len(values) > 5:
+                    print(f"           +{len(values) - 5} more")
             else:
-                print(f"  - {alert.type}")
-
-        if len(critical_high) > 10:
-            print(f"  ... and {len(critical_high) - 10} more")
+                print(f"  [{severity}] {alert_type}")
 
 
 if __name__ == "__main__":

@@ -79,9 +79,9 @@ def main():
         print(f"  Scanning: {name}...", end=" ", flush=True)
         try:
             result = client.scan(ext_id)
-            rec = result.recommendation.value.upper()
+            score = result.score_overall
             alerts = len(result.alerts)
-            print(f"{rec} ({alerts} alerts)")
+            print(f"score {score:.2f}, {alerts} alerts")
             results.append(result)
         except Exception as e:
             print(f"ERROR: {e}")

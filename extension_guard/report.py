@@ -1,54 +1,21 @@
-"""Generate beautiful HTML reports for extension scan results."""
+"""Generate clean HTML reports for extension scan results."""
 
 import html
+import json
 from datetime import datetime
-from typing import Optional
 
-from .models import ExtensionScanResult, Recommendation, Severity, ALERT_DESCRIPTIONS
+from .models import ExtensionScanResult, Severity
 
 
 def generate_html_report(
     results: list[ExtensionScanResult],
-    title: str = "Extension Guard Security Report",
+    title: str = "Extension Guard Report",
     include_raw: bool = False,
 ) -> str:
-    """
-    Generate a beautiful HTML report for extension scan results.
-
-    Args:
-        results: List of scan results to include
-        title: Report title
-        include_raw: Whether to include raw JSON data
-
-    Returns:
-        Complete HTML document as string
-    """
+    """Generate an HTML report showing scan results in a table with expandable details."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Calculate summary stats
-    total = len(results)
-    blocked = sum(1 for r in results if r.recommendation == Recommendation.BLOCK)
-    review = sum(1 for r in results if r.recommendation == Recommendation.REVIEW)
-    allowed = sum(1 for r in results if r.recommendation == Recommendation.ALLOW)
-    errors = sum(1 for r in results if r.error)
-
-    total_critical = sum(len(r.critical_alerts) for r in results)
-    total_high = sum(len(r.high_alerts) for r in results)
-
-    # Sort results: blocked first, then review, then allow
-    sorted_results = sorted(
-        results,
-        key=lambda r: (
-            0 if r.recommendation == Recommendation.BLOCK else
-            1 if r.recommendation == Recommendation.REVIEW else 2,
-            -len(r.critical_alerts),
-            -len(r.high_alerts),
-        )
-    )
-
-    extension_cards = "\n".join(
-        _render_extension_card(r, include_raw) for r in sorted_results
-    )
+    rows = "\n".join(_render_row(r, include_raw) for r in results)
 
     return f'''<!DOCTYPE html>
 <html lang="en">
@@ -57,840 +24,539 @@ def generate_html_report(
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{html.escape(title)}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <style>
-{CSS_STYLES}
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <style>{CSS}</style>
 </head>
 <body>
     <div class="container">
-        <header class="header">
-            <div class="header-content">
-                <div class="logo">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                    <span>Socket Extension Guard</span>
-                </div>
-                <h1>{html.escape(title)}</h1>
-                <p class="timestamp">Generated: {timestamp}</p>
-            </div>
+        <header>
+            <h1>{html.escape(title)}</h1>
+            <p class="meta">Generated {timestamp} &bull; {len(results)} extension(s) scanned</p>
         </header>
 
-        <section class="summary">
-            <h2>Summary</h2>
-            <div class="summary-grid">
-                <div class="stat-card">
-                    <div class="stat-value">{total}</div>
-                    <div class="stat-label">Extensions Scanned</div>
-                </div>
-                <div class="stat-card stat-block">
-                    <div class="stat-value">{blocked}</div>
-                    <div class="stat-label">Block</div>
-                </div>
-                <div class="stat-card stat-review">
-                    <div class="stat-value">{review}</div>
-                    <div class="stat-label">Review</div>
-                </div>
-                <div class="stat-card stat-allow">
-                    <div class="stat-value">{allowed}</div>
-                    <div class="stat-label">Allow</div>
-                </div>
-                <div class="stat-card stat-critical">
-                    <div class="stat-value">{total_critical}</div>
-                    <div class="stat-label">Critical Alerts</div>
-                </div>
-                <div class="stat-card stat-high">
-                    <div class="stat-value">{total_high}</div>
-                    <div class="stat-label">High Alerts</div>
-                </div>
-            </div>
-            {f'<p class="error-note">⚠️ {errors} extension(s) had scan errors</p>' if errors else ''}
-        </section>
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th class="col-expand"></th>
+                    <th class="col-name">Extension</th>
+                    <th class="col-score">Score</th>
+                    <th class="col-alerts">Alerts</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows}
+            </tbody>
+        </table>
 
-        <section class="results">
-            <h2>Scan Results</h2>
-            <div class="filter-bar">
-                <button class="filter-btn active" data-filter="all">All ({total})</button>
-                <button class="filter-btn filter-block" data-filter="block">Block ({blocked})</button>
-                <button class="filter-btn filter-review" data-filter="review">Review ({review})</button>
-                <button class="filter-btn filter-allow" data-filter="allow">Allow ({allowed})</button>
-            </div>
-            <div class="extensions-list">
-                {extension_cards}
-            </div>
-        </section>
-
-        <footer class="footer">
-            <p>
-                Powered by <a href="https://socket.dev" target="_blank">Socket.dev</a> Extension Guard
-                &bull;
-                <a href="https://docs.socket.dev/docs/language-support#extension-scanning" target="_blank">Documentation</a>
-            </p>
+        <footer>
+            Powered by <a href="https://socket.dev" target="_blank">Socket.dev</a> Extension Guard
         </footer>
     </div>
-
-    <script>
-{JS_SCRIPT}
-    </script>
+    <script>{JS}</script>
 </body>
 </html>'''
 
 
-def _render_extension_card(result: ExtensionScanResult, include_raw: bool) -> str:
-    """Render a single extension card."""
-    rec = result.recommendation
-    rec_class = rec.value.lower()
-
-    # Score bar color
+def _render_row(result: ExtensionScanResult, include_raw: bool) -> str:
+    """Render a table row with expandable details."""
     score = result.score_overall
-    if score >= 0.7:
-        score_class = "score-good"
-    elif score >= 0.4:
-        score_class = "score-moderate"
-    else:
-        score_class = "score-poor"
+    score_class = "good" if score >= 0.7 else "moderate" if score >= 0.4 else "poor"
 
-    # Alert summary
-    alerts_summary = _render_alerts_summary(result)
+    # Alert counts
+    critical = len(result.critical_alerts)
+    high = len(result.high_alerts)
+    medium = len(result.medium_alerts)
+    low = len(result.low_alerts)
 
-    # Permission badges
-    perms_html = ""
-    if result.high_risk_permissions:
-        perms_html = '<div class="permissions">'
-        for perm in result.high_risk_permissions[:6]:
-            perms_html += f'<span class="perm-badge">{html.escape(perm)}</span>'
-        if len(result.high_risk_permissions) > 6:
-            perms_html += f'<span class="perm-badge perm-more">+{len(result.high_risk_permissions) - 6} more</span>'
-        perms_html += '</div>'
+    alert_badges = []
+    if critical: alert_badges.append(f'<span class="badge critical">{critical} Critical</span>')
+    if high: alert_badges.append(f'<span class="badge high">{high} High</span>')
+    if medium: alert_badges.append(f'<span class="badge medium">{medium} Medium</span>')
+    if low: alert_badges.append(f'<span class="badge low">{low} Low</span>')
 
-    # Error state
+    alerts_html = " ".join(alert_badges) if alert_badges else '<span class="badge none">None</span>'
+
+    # Error handling
     if result.error:
         return f'''
-        <div class="extension-card rec-{rec_class}" data-recommendation="{rec_class}">
-            <div class="card-header">
-                <div class="ext-info">
-                    <h3 class="ext-name">{html.escape(result.name)}</h3>
-                    <span class="ext-id">{html.escape(result.input_purl.replace("pkg:chrome/", ""))}</span>
-                </div>
-                <div class="recommendation rec-review">
-                    <span class="rec-icon">⚠️</span>
-                    <span class="rec-text">Error</span>
-                </div>
-            </div>
-            <div class="card-body">
-                <p class="error-message">{html.escape(result.error)}</p>
-            </div>
-        </div>'''
+        <tr class="row-error">
+            <td class="col-expand"></td>
+            <td class="col-name">
+                <div class="ext-name">{html.escape(result.name or result.input_purl.replace("pkg:chrome/", ""))}</div>
+            </td>
+            <td class="col-score">—</td>
+            <td class="col-alerts"><span class="badge error">Error</span></td>
+        </tr>
+        <tr class="details-row">
+            <td colspan="4">
+                <div class="details error-details">{html.escape(result.error)}</div>
+            </td>
+        </tr>'''
 
-    # Details section
-    details_html = _render_alert_details(result)
+    # Details content
+    details = _render_details(result, include_raw)
 
-    raw_html = ""
-    if include_raw:
-        import json
-        raw_json = json.dumps(result.raw, indent=2)
-        raw_html = f'''
-        <details class="raw-data">
-            <summary>Raw API Response</summary>
-            <pre><code>{html.escape(raw_json)}</code></pre>
-        </details>'''
+    ext_id = result.input_purl.replace("pkg:chrome/", "")
 
     return f'''
-    <div class="extension-card rec-{rec_class}" data-recommendation="{rec_class}">
-        <div class="card-header">
-            <div class="ext-info">
-                <h3 class="ext-name">{html.escape(result.name)}</h3>
-                <div class="ext-meta">
-                    <span class="ext-version">v{html.escape(result.version)}</span>
-                    <span class="ext-size">{result.size_human}</span>
-                    <span class="ext-id">{html.escape(result.input_purl.replace("pkg:chrome/", ""))}</span>
-                </div>
+    <tr class="data-row" data-expanded="false">
+        <td class="col-expand"><button class="expand-btn">▶</button></td>
+        <td class="col-name">
+            <div class="ext-name">{html.escape(result.name)}</div>
+            <div class="ext-meta">
+                <code>{html.escape(ext_id)}</code>
+                <span>v{html.escape(result.version)}</span>
+                <span>{result.size_human}</span>
             </div>
-            <div class="recommendation rec-{rec_class}">
-                <span class="rec-icon">{rec.icon}</span>
-                <span class="rec-text">{rec.value.upper()}</span>
+        </td>
+        <td class="col-score">
+            <div class="score-cell">
+                <div class="score-bar"><div class="score-fill {score_class}" style="width:{score*100}%"></div></div>
+                <span class="score-value">{score:.2f}</span>
             </div>
-        </div>
-
-        <div class="card-body">
-            <div class="score-section">
-                <div class="score-bar-container">
-                    <div class="score-bar {score_class}" style="width: {score * 100}%"></div>
-                </div>
-                <div class="score-labels">
-                    <span>Security Score: <strong>{score:.2f}</strong></span>
-                    <span class="score-detail">Supply Chain: {result.score_supply_chain:.2f}</span>
-                    <span class="score-detail">Vulnerabilities: {result.score_vulnerability:.2f}</span>
-                </div>
-            </div>
-
-            <p class="recommendation-reason">{html.escape(result.recommendation_reason)}</p>
-
-            {perms_html}
-
-            {alerts_summary}
-
-            <details class="alert-details">
-                <summary>View All Alerts ({len(result.alerts)})</summary>
-                {details_html}
-            </details>
-
-            {raw_html}
-        </div>
-    </div>'''
+        </td>
+        <td class="col-alerts">{alerts_html}</td>
+    </tr>
+    <tr class="details-row">
+        <td colspan="4">
+            <div class="details">{details}</div>
+        </td>
+    </tr>'''
 
 
-def _render_alerts_summary(result: ExtensionScanResult) -> str:
-    """Render alert count badges."""
-    counts = [
-        ("Critical", len(result.critical_alerts), "critical"),
-        ("High", len(result.high_alerts), "high"),
-        ("Medium", len(result.medium_alerts), "medium"),
-        ("Low", len(result.low_alerts), "low"),
-    ]
-
-    badges = []
-    for label, count, cls in counts:
-        if count > 0:
-            badges.append(f'<span class="alert-badge alert-{cls}">{count} {label}</span>')
-
-    if not badges:
-        return '<div class="alerts-summary"><span class="alert-badge alert-none">No alerts</span></div>'
-
-    return f'<div class="alerts-summary">{" ".join(badges)}</div>'
-
-
-def _render_alert_details(result: ExtensionScanResult) -> str:
-    """Render detailed alert list."""
-    if not result.alerts:
-        return '<p class="no-alerts">No security alerts detected.</p>'
-
-    # Group by type
-    by_type = result.alerts_by_type()
-
+def _render_details(result: ExtensionScanResult, include_raw: bool) -> str:
+    """Render expanded details for an extension."""
     sections = []
-    for alert_type, alerts in sorted(by_type.items(), key=lambda x: -max(a.severity.weight for a in x[1])):
-        desc = ALERT_DESCRIPTIONS.get(alert_type, {})
-        title = desc.get("title", alert_type)
-        severity = alerts[0].severity
 
-        values = []
-        for a in alerts[:10]:
-            val = a.display_value
-            if val:
-                values.append(f'<li><code>{html.escape(val)}</code></li>')
+    # Scores breakdown
+    sections.append(f'''
+    <div class="detail-section">
+        <h4>Scores</h4>
+        <div class="scores-grid">
+            <div class="score-item">
+                <span class="score-label">Overall</span>
+                <span class="score-num">{result.score_overall:.2f}</span>
+            </div>
+            <div class="score-item">
+                <span class="score-label">Supply Chain</span>
+                <span class="score-num">{result.score_supply_chain:.2f}</span>
+            </div>
+            <div class="score-item">
+                <span class="score-label">Vulnerability</span>
+                <span class="score-num">{result.score_vulnerability:.2f}</span>
+            </div>
+        </div>
+    </div>''')
 
-        if len(alerts) > 10:
-            values.append(f'<li class="more">+{len(alerts) - 10} more</li>')
+    # Alerts by type
+    if result.alerts:
+        by_type = result.alerts_by_type()
+        alert_sections = []
 
-        values_html = f'<ul class="alert-values">{" ".join(values)}</ul>' if values else ''
+        # Sort by severity (most severe first)
+        sorted_types = sorted(
+            by_type.items(),
+            key=lambda x: -max(a.severity.weight for a in x[1])
+        )
+
+        for alert_type, alerts in sorted_types:
+            severity = alerts[0].severity
+            sev_class = severity.value
+
+            values = [a.display_value for a in alerts if a.display_value]
+            values_html = ""
+            if values:
+                items = [f"<li><code>{html.escape(v)}</code></li>" for v in values[:15]]
+                if len(values) > 15:
+                    items.append(f"<li class='more'>+{len(values)-15} more</li>")
+                values_html = f"<ul class='alert-values'>{''.join(items)}</ul>"
+
+            alert_sections.append(f'''
+            <div class="alert-group">
+                <div class="alert-header">
+                    <span class="alert-type sev-{sev_class}">{html.escape(alert_type)}</span>
+                    <span class="alert-count">{len(alerts)}</span>
+                </div>
+                {values_html}
+            </div>''')
 
         sections.append(f'''
-        <div class="alert-type-section">
-            <div class="alert-type-header">
-                <span class="alert-type-badge sev-{severity.value}">{html.escape(title)}</span>
-                <span class="alert-count">{len(alerts)}</span>
-            </div>
-            <p class="alert-description">{html.escape(desc.get("description", ""))}</p>
-            {values_html}
+        <div class="detail-section">
+            <h4>Alerts ({len(result.alerts)})</h4>
+            <div class="alerts-list">{''.join(alert_sections)}</div>
+        </div>''')
+    else:
+        sections.append('''
+        <div class="detail-section">
+            <h4>Alerts</h4>
+            <p class="no-alerts">No alerts detected</p>
         </div>''')
 
-    return "\n".join(sections)
+    # Raw JSON
+    if include_raw and result.raw:
+        raw_json = json.dumps(result.raw, indent=2)
+        sections.append(f'''
+        <div class="detail-section">
+            <details class="raw-section">
+                <summary>Raw API Response</summary>
+                <pre><code>{html.escape(raw_json)}</code></pre>
+            </details>
+        </div>''')
+
+    return "".join(sections)
 
 
-CSS_STYLES = '''
-:root {
-    --bg-primary: #0a0a0f;
-    --bg-secondary: #12121a;
-    --bg-card: #1a1a24;
-    --bg-hover: #22222e;
-    --text-primary: #f4f4f5;
-    --text-secondary: #a1a1aa;
-    --text-muted: #71717a;
-    --border: #27272a;
-    --accent: #8b5cf6;
-    --accent-hover: #a78bfa;
-
-    --red: #ef4444;
-    --red-bg: rgba(239, 68, 68, 0.1);
-    --orange: #f97316;
-    --orange-bg: rgba(249, 115, 22, 0.1);
-    --yellow: #eab308;
-    --yellow-bg: rgba(234, 179, 8, 0.1);
-    --green: #22c55e;
-    --green-bg: rgba(34, 197, 94, 0.1);
-    --blue: #3b82f6;
-    --blue-bg: rgba(59, 130, 246, 0.1);
-}
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
+CSS = '''
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    line-height: 1.6;
-    min-height: 100vh;
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #0f0f14;
+    color: #e4e4e7;
+    line-height: 1.5;
 }
 
 .container {
-    max-width: 1200px;
+    max-width: 1100px;
     margin: 0 auto;
     padding: 2rem;
 }
 
-/* Header */
-.header {
-    margin-bottom: 3rem;
-    padding-bottom: 2rem;
-    border-bottom: 1px solid var(--border);
-}
-
-.header-content {
-    text-align: center;
-}
-
-.logo {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.75rem;
-    color: var(--accent);
-    font-weight: 600;
-    font-size: 1.125rem;
-    margin-bottom: 1rem;
-}
-
-.logo svg {
-    color: var(--accent);
+header {
+    margin-bottom: 2rem;
 }
 
 h1 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    margin-bottom: 0.5rem;
-    background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.timestamp {
-    color: var(--text-muted);
-    font-size: 0.875rem;
-}
-
-/* Summary Section */
-.summary {
-    margin-bottom: 3rem;
-}
-
-.summary h2 {
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     font-weight: 600;
-    margin-bottom: 1.5rem;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.summary-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 1rem;
-}
-
-.stat-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.5rem;
-    text-align: center;
-    transition: transform 0.2s, border-color 0.2s;
-}
-
-.stat-card:hover {
-    transform: translateY(-2px);
-    border-color: var(--accent);
-}
-
-.stat-value {
-    font-size: 2.5rem;
-    font-weight: 700;
-    font-family: 'JetBrains Mono', monospace;
     margin-bottom: 0.25rem;
 }
 
-.stat-label {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-}
-
-.stat-block .stat-value { color: var(--red); }
-.stat-review .stat-value { color: var(--yellow); }
-.stat-allow .stat-value { color: var(--green); }
-.stat-critical .stat-value { color: var(--red); }
-.stat-high .stat-value { color: var(--orange); }
-
-.error-note {
-    margin-top: 1rem;
-    padding: 0.75rem 1rem;
-    background: var(--yellow-bg);
-    border: 1px solid var(--yellow);
-    border-radius: 8px;
-    color: var(--yellow);
+.meta {
+    color: #71717a;
     font-size: 0.875rem;
 }
 
-/* Filter Bar */
-.filter-bar {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
-}
-
-.filter-btn {
-    padding: 0.5rem 1rem;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.filter-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--text-muted);
-}
-
-.filter-btn.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: white;
-}
-
-.filter-block.active { background: var(--red); border-color: var(--red); }
-.filter-review.active { background: var(--yellow); border-color: var(--yellow); color: var(--bg-primary); }
-.filter-allow.active { background: var(--green); border-color: var(--green); }
-
-/* Extension Cards */
-.extensions-list {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-
-.extension-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
+/* Table */
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #18181b;
+    border-radius: 12px;
     overflow: hidden;
-    transition: border-color 0.2s;
 }
 
-.extension-card:hover {
-    border-color: var(--text-muted);
+thead {
+    background: #1f1f26;
 }
 
-.extension-card.rec-block {
-    border-left: 4px solid var(--red);
+th {
+    text-align: left;
+    padding: 0.875rem 1rem;
+    font-weight: 500;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #71717a;
+    border-bottom: 1px solid #27272a;
 }
 
-.extension-card.rec-review {
-    border-left: 4px solid var(--yellow);
+.col-expand { width: 40px; }
+.col-name { width: 40%; }
+.col-score { width: 140px; }
+.col-alerts { }
+
+/* Data rows */
+.data-row {
+    cursor: pointer;
+    transition: background 0.15s;
 }
 
-.extension-card.rec-allow {
-    border-left: 4px solid var(--green);
+.data-row:hover {
+    background: #1f1f26;
 }
 
-.card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding: 1.25rem 1.5rem;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
+.data-row td {
+    padding: 1rem;
+    border-bottom: 1px solid #27272a;
+    vertical-align: middle;
 }
 
-.ext-info {
-    flex: 1;
-    min-width: 0;
+.expand-btn {
+    background: none;
+    border: none;
+    color: #52525b;
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 0.25rem;
+    transition: transform 0.2s, color 0.15s;
+}
+
+.data-row:hover .expand-btn {
+    color: #a1a1aa;
+}
+
+.data-row[data-expanded="true"] .expand-btn {
+    transform: rotate(90deg);
+    color: #8b5cf6;
 }
 
 .ext-name {
-    font-size: 1.125rem;
-    font-weight: 600;
+    font-weight: 500;
     margin-bottom: 0.25rem;
-    word-break: break-word;
 }
 
 .ext-meta {
     display: flex;
-    flex-wrap: wrap;
     gap: 0.75rem;
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-}
-
-.ext-meta span {
-    display: inline-flex;
-    align-items: center;
-}
-
-.ext-id {
-    font-family: 'JetBrains Mono', monospace;
     font-size: 0.75rem;
-    background: var(--bg-card);
-    padding: 0.125rem 0.5rem;
-    border-radius: 4px;
+    color: #71717a;
 }
 
-.recommendation {
+.ext-meta code {
+    font-family: 'JetBrains Mono', monospace;
+    background: #27272a;
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+}
+
+/* Score */
+.score-cell {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 0.875rem;
-    white-space: nowrap;
-}
-
-.rec-block {
-    background: var(--red-bg);
-    color: var(--red);
-}
-
-.rec-review {
-    background: var(--yellow-bg);
-    color: var(--yellow);
-}
-
-.rec-allow {
-    background: var(--green-bg);
-    color: var(--green);
-}
-
-.card-body {
-    padding: 1.5rem;
-}
-
-/* Score Bar */
-.score-section {
-    margin-bottom: 1rem;
-}
-
-.score-bar-container {
-    height: 8px;
-    background: var(--bg-secondary);
-    border-radius: 4px;
-    overflow: hidden;
-    margin-bottom: 0.5rem;
+    gap: 0.75rem;
 }
 
 .score-bar {
+    flex: 1;
+    height: 6px;
+    background: #27272a;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.score-fill {
     height: 100%;
-    border-radius: 4px;
-    transition: width 0.5s ease-out;
+    border-radius: 3px;
 }
 
-.score-good { background: linear-gradient(90deg, var(--green), #4ade80); }
-.score-moderate { background: linear-gradient(90deg, var(--yellow), #facc15); }
-.score-poor { background: linear-gradient(90deg, var(--red), var(--orange)); }
+.score-fill.good { background: #22c55e; }
+.score-fill.moderate { background: #eab308; }
+.score-fill.poor { background: #ef4444; }
 
-.score-labels {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
+.score-value {
+    font-family: 'JetBrains Mono', monospace;
     font-size: 0.875rem;
-    color: var(--text-secondary);
+    font-weight: 500;
+    min-width: 2.5rem;
 }
 
-.score-detail {
-    color: var(--text-muted);
-}
-
-.recommendation-reason {
-    color: var(--text-secondary);
-    margin-bottom: 1rem;
-    font-size: 0.9375rem;
-}
-
-/* Permissions */
-.permissions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-}
-
-.perm-badge {
-    display: inline-flex;
-    padding: 0.25rem 0.75rem;
-    background: var(--orange-bg);
-    border: 1px solid var(--orange);
-    border-radius: 100px;
+/* Badges */
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
     font-size: 0.75rem;
     font-weight: 500;
-    color: var(--orange);
+    margin-right: 0.375rem;
+}
+
+.badge.critical { background: rgba(239,68,68,0.15); color: #ef4444; }
+.badge.high { background: rgba(249,115,22,0.15); color: #f97316; }
+.badge.medium { background: rgba(234,179,8,0.15); color: #eab308; }
+.badge.low { background: rgba(34,197,94,0.15); color: #22c55e; }
+.badge.none { background: #27272a; color: #71717a; }
+.badge.error { background: rgba(239,68,68,0.15); color: #ef4444; }
+
+/* Details row */
+.details-row {
+    display: none;
+}
+
+.details-row.visible {
+    display: table-row;
+}
+
+.details-row td {
+    padding: 0;
+    background: #131316;
+    border-bottom: 1px solid #27272a;
+}
+
+.details {
+    padding: 1.5rem;
+    display: grid;
+    gap: 1.5rem;
+}
+
+.error-details {
+    color: #ef4444;
     font-family: 'JetBrains Mono', monospace;
+    font-size: 0.875rem;
 }
 
-.perm-more {
-    background: var(--bg-secondary);
-    border-color: var(--border);
-    color: var(--text-muted);
+.detail-section h4 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #71717a;
+    margin-bottom: 0.75rem;
 }
 
-/* Alerts Summary */
-.alerts-summary {
+/* Scores grid */
+.scores-grid {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
+    gap: 2rem;
 }
 
-.alert-badge {
-    padding: 0.25rem 0.75rem;
-    border-radius: 6px;
+.score-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.score-label {
     font-size: 0.8125rem;
+    color: #a1a1aa;
+}
+
+.score-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.25rem;
     font-weight: 500;
 }
 
-.alert-critical { background: var(--red-bg); color: var(--red); }
-.alert-high { background: var(--orange-bg); color: var(--orange); }
-.alert-medium { background: var(--yellow-bg); color: var(--yellow); }
-.alert-low { background: var(--green-bg); color: var(--green); }
-.alert-none { background: var(--bg-secondary); color: var(--text-muted); }
-
-/* Alert Details */
-.alert-details {
-    margin-top: 1rem;
+/* Alerts list */
+.alerts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
 }
 
-.alert-details summary {
-    cursor: pointer;
-    color: var(--accent);
-    font-weight: 500;
-    padding: 0.5rem 0;
-    user-select: none;
-}
-
-.alert-details summary:hover {
-    color: var(--accent-hover);
-}
-
-.alert-type-section {
-    padding: 1rem;
-    margin: 0.75rem 0;
-    background: var(--bg-secondary);
+.alert-group {
+    background: #1a1a1f;
+    border: 1px solid #27272a;
     border-radius: 8px;
-    border: 1px solid var(--border);
+    padding: 0.875rem;
 }
 
-.alert-type-header {
+.alert-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 0.5rem;
 }
 
-.alert-type-badge {
-    padding: 0.25rem 0.625rem;
-    border-radius: 4px;
+.alert-type {
     font-size: 0.8125rem;
-    font-weight: 600;
+    font-weight: 500;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
 }
 
-.sev-critical { background: var(--red); color: white; }
-.sev-high { background: var(--orange); color: white; }
-.sev-middle { background: var(--yellow); color: var(--bg-primary); }
-.sev-low { background: var(--green); color: white; }
+.sev-critical { background: #ef4444; color: white; }
+.sev-high { background: #f97316; color: white; }
+.sev-middle { background: #eab308; color: #0f0f14; }
+.sev-low { background: #22c55e; color: white; }
+.sev-unknown { background: #52525b; color: white; }
 
 .alert-count {
-    font-size: 0.875rem;
-    color: var(--text-muted);
     font-family: 'JetBrains Mono', monospace;
-}
-
-.alert-description {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    margin-bottom: 0.5rem;
+    font-size: 0.75rem;
+    color: #71717a;
 }
 
 .alert-values {
     list-style: none;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.375rem;
 }
 
 .alert-values li {
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
 }
 
 .alert-values code {
-    background: var(--bg-card);
-    padding: 0.125rem 0.5rem;
-    border-radius: 4px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
-    color: var(--text-primary);
+    background: #27272a;
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
 }
 
 .alert-values .more {
-    color: var(--text-muted);
+    color: #71717a;
     font-style: italic;
 }
 
-/* Raw Data */
-.raw-data {
-    margin-top: 1rem;
+.no-alerts {
+    color: #71717a;
+    font-size: 0.875rem;
 }
 
-.raw-data summary {
+/* Raw section */
+.raw-section summary {
     cursor: pointer;
-    color: var(--text-muted);
+    color: #71717a;
     font-size: 0.8125rem;
 }
 
-.raw-data pre {
-    margin-top: 0.5rem;
+.raw-section pre {
+    margin-top: 0.75rem;
+    background: #0f0f14;
     padding: 1rem;
-    background: var(--bg-primary);
-    border-radius: 8px;
+    border-radius: 6px;
     overflow-x: auto;
     font-size: 0.75rem;
 }
 
-.raw-data code {
+.raw-section code {
     font-family: 'JetBrains Mono', monospace;
-    color: var(--text-secondary);
-}
-
-/* Error Message */
-.error-message {
-    color: var(--red);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.875rem;
-    padding: 1rem;
-    background: var(--red-bg);
-    border-radius: 8px;
+    color: #a1a1aa;
 }
 
 /* Footer */
-.footer {
-    margin-top: 4rem;
-    padding-top: 2rem;
-    border-top: 1px solid var(--border);
+footer {
+    margin-top: 2rem;
     text-align: center;
-    color: var(--text-muted);
-    font-size: 0.875rem;
+    color: #52525b;
+    font-size: 0.8125rem;
 }
 
-.footer a {
-    color: var(--accent);
+footer a {
+    color: #8b5cf6;
     text-decoration: none;
 }
 
-.footer a:hover {
+footer a:hover {
     text-decoration: underline;
 }
 
+/* Error row */
+.row-error td {
+    padding: 1rem;
+    border-bottom: none;
+}
+
 /* Responsive */
-@media (max-width: 768px) {
-    .container {
-        padding: 1rem;
-    }
-
-    h1 {
-        font-size: 1.75rem;
-    }
-
-    .card-header {
-        flex-direction: column;
-        gap: 1rem;
-    }
-
-    .recommendation {
-        align-self: flex-start;
-    }
-
-    .score-labels {
-        flex-direction: column;
-        gap: 0.25rem;
-    }
-}
-
-/* Animation */
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.extension-card {
-    animation: fadeIn 0.3s ease-out;
-}
-
-.extension-card:nth-child(2) { animation-delay: 0.05s; }
-.extension-card:nth-child(3) { animation-delay: 0.1s; }
-.extension-card:nth-child(4) { animation-delay: 0.15s; }
-.extension-card:nth-child(5) { animation-delay: 0.2s; }
-
-/* Hidden state for filtering */
-.extension-card.hidden {
-    display: none;
+@media (max-width: 640px) {
+    .container { padding: 1rem; }
+    .col-score { display: none; }
+    .scores-grid { flex-direction: column; gap: 0.5rem; }
 }
 '''
 
-JS_SCRIPT = '''
-document.addEventListener('DOMContentLoaded', function() {
-    const filterBtns = document.querySelectorAll('.filter-btn');
-    const cards = document.querySelectorAll('.extension-card');
+JS = '''
+document.querySelectorAll('.data-row').forEach(row => {
+    row.addEventListener('click', () => {
+        const expanded = row.dataset.expanded === 'true';
+        row.dataset.expanded = !expanded;
 
-    filterBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const filter = this.dataset.filter;
-
-            // Update active button
-            filterBtns.forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
-
-            // Filter cards
-            cards.forEach(card => {
-                if (filter === 'all') {
-                    card.classList.remove('hidden');
-                } else {
-                    const rec = card.dataset.recommendation;
-                    card.classList.toggle('hidden', rec !== filter);
-                }
-            });
-        });
-    });
-
-    // Auto-expand details for blocked extensions
-    cards.forEach(card => {
-        if (card.dataset.recommendation === 'block') {
-            const details = card.querySelector('.alert-details');
-            if (details) {
-                details.open = true;
-            }
+        const detailsRow = row.nextElementSibling;
+        if (detailsRow && detailsRow.classList.contains('details-row')) {
+            detailsRow.classList.toggle('visible', !expanded);
         }
     });
 });
