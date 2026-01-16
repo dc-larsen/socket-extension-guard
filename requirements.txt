@@ -1,0 +1,2 @@
+# Extension Guard Demo Dependencies
+requests>=2.28.0

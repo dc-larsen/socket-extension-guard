@@ -1,0 +1,22 @@
+# Example Extension List
+# One extension per line (ID or Chrome Web Store URL)
+# Lines starting with # are comments
+
+# Ad Blockers
+cjpalhdlnbpafiamejdnhcphjbkeiagm  # uBlock Origin
+gighmmpiobklfepjocnamgkkbiglidom  # AdBlock
+
+# Password Managers
+hdokiejnpimakedhajhdlcegeplioahd  # LastPass
+nngceckbapebfimnlniiiahkandclblb  # Bitwarden
+
+# Developer Tools
+fmkadmapgofadopljbjfkapdkoienihi  # React Developer Tools
+lmhkpmbekcpmknklioeibfkpmmfibljd  # Redux DevTools
+
+# Productivity
+aapbdbdomjkkjkaonfhkkikfgjllcleb  # Google Translate
+ckkdlimhmcjmikdlpkmbgfkaikojcbjk  # Markdown Viewer
+
+# Security
+jbcobpbfgkhmjfpjjepkcocalmpkiaop  # Socket Security
